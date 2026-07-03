@@ -5,6 +5,7 @@ Extracted tool implementation functions (do_* and helpers) from agent_tools.py.
 These handle the actual execution logic for each tool type.
 """
 
+import json
 import logging
 import os
 from typing import Dict, Optional
