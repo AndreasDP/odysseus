@@ -6,6 +6,7 @@ These handle the actual execution logic for each tool type.
 """
 
 import logging
+import os
 from typing import Dict, Optional
 
 from src.tool_utils import get_mcp_manager  # re-exported: tests patch src.tool_implementations.get_mcp_manager
