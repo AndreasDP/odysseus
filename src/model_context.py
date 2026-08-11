@@ -393,6 +393,44 @@ def _proxy_catalog_context(endpoint_url: str, model: str) -> Optional[int]:
     return None
 
 
+def _ollama_show_context(endpoint_url: str, model: str) -> Optional[int]:
+    """Query Ollama's native ``/api/show`` for this model's real context window.
+
+    ``/api/show`` reports a Modelfile ``PARAMETER num_ctx`` override when the
+    user has set one, else the architecture's max ``context_length``. Both are
+    more accurate per-model than the static KNOWN_CONTEXT_WINDOWS substring
+    table, which only knows a model family's usual max and has no way to see
+    a local override (issue: local Modelfile num_ctx override was ignored,
+    reporting the architecture max instead and forcing that larger window
+    back onto Ollama as num_ctx on every request).
+    """
+    try:
+        parsed = urlparse(endpoint_url)
+    except Exception:
+        return None
+    host = (parsed.hostname or "").lower()
+    if not (parsed.port == 11434 or "ollama" in host):
+        return None
+    try:
+        from src.model_capability_readers.ollama import context_tokens_from_show
+        # endpoint_url may be stored native ("…:11434/api") or OpenAI-compat
+        # ("…:11434/v1") — strip either suffix to reach the bare host:port
+        # root, matching the stripping routes/model_routes.py already does
+        # for /api/tags probes against the same two shapes.
+        root = (endpoint_url or "").strip().rstrip("/")
+        for suffix in ("/v1", "/api"):
+            if root.endswith(suffix):
+                root = root[: -len(suffix)].rstrip("/")
+                break
+        r = httpx.post(f"{root}/api/show", json={"model": model}, timeout=REQUEST_TIMEOUT)
+        if not r.is_success:
+            return None
+        return context_tokens_from_show(r.json())
+    except Exception as e:
+        logger.debug(f"Ollama /api/show probe failed for {model}: {e}")
+        return None
+
+
 def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
     """Query the model API for context length. Returns (context_length, known) where
     ``known`` is False only for the bare DEFAULT_CONTEXT fallback."""
@@ -416,6 +454,15 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
             logger.info(f"Proxy catalog reports context window for {model}: {api_ctx}")
             return api_ctx, True
         return DEFAULT_CONTEXT, False
+
+    # Ollama native /api/show — reports the actual per-model window (Modelfile
+    # num_ctx override, else architecture max), ahead of llama.cpp /slots and
+    # the static known-table so a local Modelfile override always wins.
+    if is_local_endpoint(endpoint_url):
+        ollama_ctx = _ollama_show_context(endpoint_url, model)
+        if ollama_ctx:
+            logger.info(f"Ollama /api/show reports context window for {model}: {ollama_ctx}")
+            return ollama_ctx, True
 
     # Try llama.cpp /slots endpoint first — reports actual serving context
     if is_local_endpoint(endpoint_url):

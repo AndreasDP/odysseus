@@ -115,6 +115,17 @@ def _limits_from_show(raw: Mapping[str, Any]) -> dict[str, Any]:
     return limits
 
 
+def context_tokens_from_show(payload: Mapping[str, Any]) -> int | None:
+    """Extract the context window from a native ``/api/show`` payload.
+
+    Prefers an explicit Modelfile ``PARAMETER num_ctx`` (the user's declared
+    override, e.g. to fit VRAM) over the model's architecture-reported max
+    (``model_info``'s ``<arch>.context_length``) — see ``_limits_from_show``'s
+    exact-key-before-namespaced-fallback ordering.
+    """
+    return _limits_from_show(as_mapping(payload)).get("context_tokens")
+
+
 def record_from_show_payload(
     model_id: str,
     payload: Mapping[str, Any],
