@@ -438,6 +438,20 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
     api_ctx = None
     configured_kind = _configured_endpoint_kind(endpoint_url)
 
+    # Ollama native /api/show — reports the actual per-model window (a
+    # Modelfile num_ctx override, else the architecture max) straight from
+    # the server. Tried unconditionally, ahead of the api/proxy known-table
+    # shortcut below: an Ollama endpoint reached over a LAN IP is easy to
+    # save as endpoint_kind "api" in Odysseus's own settings (it isn't
+    # "localhost"), which would otherwise return the known-table guess
+    # before ever reaching the is_local_endpoint-gated checks further down.
+    # _ollama_show_context self-gates on port 11434 / "ollama" in host and a
+    # single-model POST is cheap, so there's no catalog-download cost here.
+    ollama_ctx = _ollama_show_context(endpoint_url, model)
+    if ollama_ctx:
+        logger.info(f"Ollama /api/show reports context window for {model}: {ollama_ctx}")
+        return ollama_ctx, True
+
     # Large OpenAI-compatible proxies can make /models expensive. If the
     # endpoint is explicitly configured as API/proxy, prefer known context
     # metadata (or the default) over downloading the full catalog.
@@ -454,15 +468,6 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
             logger.info(f"Proxy catalog reports context window for {model}: {api_ctx}")
             return api_ctx, True
         return DEFAULT_CONTEXT, False
-
-    # Ollama native /api/show — reports the actual per-model window (Modelfile
-    # num_ctx override, else architecture max), ahead of llama.cpp /slots and
-    # the static known-table so a local Modelfile override always wins.
-    if is_local_endpoint(endpoint_url):
-        ollama_ctx = _ollama_show_context(endpoint_url, model)
-        if ollama_ctx:
-            logger.info(f"Ollama /api/show reports context window for {model}: {ollama_ctx}")
-            return ollama_ctx, True
 
     # Try llama.cpp /slots endpoint first — reports actual serving context
     if is_local_endpoint(endpoint_url):
