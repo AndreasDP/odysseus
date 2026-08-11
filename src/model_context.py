@@ -413,15 +413,14 @@ def _ollama_show_context(endpoint_url: str, model: str) -> Optional[int]:
         return None
     try:
         from src.model_capability_readers.ollama import context_tokens_from_show
-        # endpoint_url may be stored native ("…:11434/api") or OpenAI-compat
-        # ("…:11434/v1") — strip either suffix to reach the bare host:port
-        # root, matching the stripping routes/model_routes.py already does
-        # for /api/tags probes against the same two shapes.
-        root = (endpoint_url or "").strip().rstrip("/")
-        for suffix in ("/v1", "/api"):
-            if root.endswith(suffix):
-                root = root[: -len(suffix)].rstrip("/")
-                break
+        # endpoint_url can arrive as anything from a bare host:port to a fully
+        # built chat-completions URL ("…:11434/v1/chat/completions") depending
+        # on the caller. Ollama's native API is always rooted at plain
+        # scheme://host:port regardless of what path this particular endpoint
+        # value carries, so drop the path entirely rather than trying to
+        # enumerate every possible suffix (a bare "/v1"/"/api" strip left
+        # "/chat/completions" in place and silently 404'd every call).
+        root = f"{parsed.scheme}://{parsed.netloc}"
         r = httpx.post(f"{root}/api/show", json={"model": model}, timeout=REQUEST_TIMEOUT)
         if not r.is_success:
             return None
